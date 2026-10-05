@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, GeoJSON, Tooltip as LeafletTooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON, Polyline, Tooltip as LeafletTooltip, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Doughnut, Bar } from 'react-chartjs-2';
 import {
@@ -37,28 +37,169 @@ import {
   Eye,
   X,
   Check,
-  Users
+  Users,
+  Compass,
+  Radio
 } from 'lucide-react';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, ChartTooltip, Legend);
 
-// Corridors & Projects
+// Global & National Map Basemaps (including Google Maps Satellite, Streets, Terrain)
+const BASEMAPS = {
+  googleHybrid: {
+    id: 'googleHybrid',
+    name: 'Google Satellite (Hybrid)',
+    icon: '🛰️',
+    url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+    attribution: 'Map &copy; Google Maps Hybrid Satellite'
+  },
+  googleStreets: {
+    id: 'googleStreets',
+    name: 'Google Maps (Roads & Cities)',
+    icon: '🗺️',
+    url: 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+    attribution: 'Map &copy; Google Maps Streets'
+  },
+  googleTerrain: {
+    id: 'googleTerrain',
+    name: 'Google Terrain (Topography)',
+    icon: '🏔️',
+    url: 'https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}',
+    attribution: 'Map &copy; Google Maps Terrain'
+  },
+  esriDark: {
+    id: 'esriDark',
+    name: 'Esri Cyber Dark Canvas',
+    icon: '🌙',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Tiles &copy; Esri &mdash; Bhoomi Sethu GIS'
+  },
+  osm: {
+    id: 'osm',
+    name: 'OpenStreetMap Global',
+    icon: '🌍',
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; OpenStreetMap contributors'
+  }
+};
+
+// National Mega-Projects & Corridors
 const PROJECTS = [
-  { id: 'dmic', name: 'Delhi-Mumbai Industrial Corridor (DMIC - Palghar Node)', state: 'Maharashtra', targetArea: '14,250 Ha', totalParcels: 1482 },
-  { id: 'mahsr', name: 'Mumbai-Ahmedabad High-Speed Rail (Bullet Train - C4)', state: 'Gujarat / MH', targetArea: '1,890 Ha', totalParcels: 840 },
-  { id: 'expressway', name: 'Nagpur-Goa Shaktipeeth Expressway (Section 2)', state: 'Maharashtra', targetArea: '9,120 Ha', totalParcels: 2150 }
+  {
+    id: 'all_india',
+    name: 'Pan-India National Land Acquisition Grid (PM Gati Shakti)',
+    state: 'All India (Central Network)',
+    targetArea: '1,42,000 Ha',
+    totalParcels: 8450,
+    center: [22.5937, 78.9629],
+    zoom: 5
+  },
+  {
+    id: 'mahsr',
+    name: 'Mumbai-Ahmedabad High-Speed Rail (Bullet Train - C4)',
+    state: 'Maharashtra / Gujarat',
+    targetArea: '1,890 Ha',
+    totalParcels: 840,
+    center: [21.1702, 72.8311],
+    zoom: 8
+  },
+  {
+    id: 'dmic',
+    name: 'Delhi-Mumbai Industrial Corridor (DMIC - Dholera & Palghar Nodes)',
+    state: 'Delhi / RJ / GJ / MH',
+    targetArea: '14,250 Ha',
+    totalParcels: 1482,
+    center: [23.5000, 73.2000],
+    zoom: 7
+  },
+  {
+    id: 'cbic',
+    name: 'Chennai-Bengaluru Industrial Corridor (CBIC)',
+    state: 'Karnataka / Tamil Nadu',
+    targetArea: '6,400 Ha',
+    totalParcels: 1120,
+    center: [12.9716, 79.1585],
+    zoom: 8
+  },
+  {
+    id: 'expressway',
+    name: 'Nagpur-Goa Shaktipeeth Expressway (Section 2)',
+    state: 'Maharashtra',
+    targetArea: '9,120 Ha',
+    totalParcels: 2150,
+    center: [18.8000, 75.5000],
+    zoom: 7
+  }
 ];
 
-// Mock Real Land Parcels in Palghar/Maharashtra corridor
+// Major Infrastructure Corridors Alignments (Polylines)
+const CORRIDOR_ALIGNMENTS = {
+  mahsr: [
+    [19.0657, 72.8687], // Mumbai BKC
+    [19.1860, 72.9759], // Thane
+    [19.6967, 72.7699], // Palghar / Virar
+    [20.3718, 72.9043], // Vapi
+    [20.9467, 72.9520], // Navsari
+    [21.1702, 72.8311], // Surat
+    [21.7051, 72.9959], // Bharuch
+    [22.3072, 73.1812], // Vadodara
+    [22.5645, 72.9289], // Anand
+    [23.0805, 72.5850]  // Ahmedabad Sabarmati
+  ],
+  dmic: [
+    [28.5355, 77.5458], // Greater Noida / Dadri
+    [27.9868, 76.3828], // Neemrana / Alwar
+    [26.9124, 75.7873], // Jaipur
+    [24.5854, 73.7125], // Udaipur
+    [23.0225, 72.5714], // Ahmedabad / Sanand
+    [22.2471, 72.1932], // Dholera SIR
+    [21.7100, 72.6000], // Bharuch Dahej
+    [19.9800, 72.7300], // Dahanu / Palghar Node
+    [18.9500, 72.9500]  // JNPT Mumbai
+  ],
+  cbic: [
+    [12.9698, 77.7500], // Bengaluru Whitefield
+    [12.7409, 77.8253], // Hosur SIPCOT
+    [12.5186, 78.2137], // Krishnagiri
+    [12.9165, 79.1325], // Vellore
+    [12.9710, 79.9480], // Sriperumbudur
+    [13.2500, 80.3300]  // Chennai Port
+  ],
+  expressway: [
+    [21.1458, 79.0882], // Nagpur
+    [20.7453, 78.6022], // Wardha
+    [19.1383, 77.3210], // Nanded
+    [18.4088, 76.5604], // Latur
+    [17.6599, 75.9064], // Solapur
+    [16.8524, 74.5815], // Sangli
+    [16.7050, 74.2433], // Kolhapur
+    [15.4989, 73.8278]  // Goa
+  ]
+};
+
+// Land Parcels across multiple Indian Corridors & States
 const INITIAL_PARCELS = [
-  { id: 'P-784', ulpin: 'MH-27-P784-9021', surveyNo: '142/3A', owner: 'Rameshwar Patil & Co-sharers', village: 'Palghar West', areaHectares: 4.8, status: 'dispute', stage: 'Section 19 Declaration', marketValueCr: 2.14, solatiumCr: 2.14, totalCompensationCr: 4.28, delayRisk: 89, predictedSlippageMonths: 4.5, anomaly: 'Title Litigation & Valuation Dispute', dbtStatus: 'Escrow Frozen', lat: 19.6967, lng: 72.7699 },
-  { id: 'P-235', ulpin: 'MH-27-P235-4102', surveyNo: '88/1', owner: 'Gram Panchayat Common Land', village: 'Kelwe Node', areaHectares: 12.2, status: 'negotiation', stage: 'Section 11 Preliminary', marketValueCr: 3.50, solatiumCr: 3.50, totalCompensationCr: 7.00, delayRisk: 42, predictedSlippageMonths: 1.5, anomaly: '18% Valuation Anomaly below Circle Rate', dbtStatus: 'Under Review', lat: 19.6200, lng: 72.7300 },
-  { id: 'P-912', ulpin: 'MH-27-P912-8834', surveyNo: '204/B', owner: 'Sunita Devi & Heirs', village: 'Manor Rural', areaHectares: 3.1, status: 'discovery', stage: 'Social Impact Assessment', marketValueCr: 1.10, solatiumCr: 1.10, totalCompensationCr: 2.20, delayRisk: 61, predictedSlippageMonths: 2.8, anomaly: 'Missing 7/12 Land Extracts', dbtStatus: 'Pending Verification', lat: 19.7400, lng: 72.9100 },
-  { id: 'P-104', ulpin: 'MH-27-P104-1290', surveyNo: '12/4', owner: 'Maharashtra Agro Industries Corp', village: 'Boisar Industrial Zone', areaHectares: 18.5, status: 'acquired', stage: 'Section 38 Possession Handover', marketValueCr: 9.80, solatiumCr: 9.80, totalCompensationCr: 19.60, delayRisk: 4, predictedSlippageMonths: 0.0, anomaly: 'None - Clean Title', dbtStatus: 'PFMS Disbursed', lat: 19.8000, lng: 72.7550 },
-  { id: 'P-556', ulpin: 'MH-27-P556-3471', surveyNo: '315/2', owner: 'Vikram Joshi (Power of Attorney)', village: 'Kasa Sector 1', areaHectares: 5.6, status: 'negotiation', stage: 'Section 19 Declaration', marketValueCr: 2.40, solatiumCr: 2.40, totalCompensationCr: 4.80, delayRisk: 55, predictedSlippageMonths: 2.0, anomaly: 'Multiple PoA Claims Flagged', dbtStatus: 'Escrow Frozen', lat: 19.8600, lng: 72.9300 },
-  { id: 'P-320', ulpin: 'MH-27-P320-7712', surveyNo: '77/9', owner: 'Kisan Tribal Welfare Trust', village: 'Dahanu Hinterland', areaHectares: 15.0, status: 'dispute', stage: 'Section 11 Preliminary', marketValueCr: 5.20, solatiumCr: 5.20, totalCompensationCr: 10.40, delayRisk: 92, predictedSlippageMonths: 5.2, anomaly: 'Forest Rights Act (FRA) Clearance Pending', dbtStatus: 'Escrow Frozen', lat: 19.9800, lng: 72.7300 },
-  { id: 'P-441', ulpin: 'MH-27-P441-5509', surveyNo: '19/1A', owner: 'Deepak Mhatre & Family', village: 'Safale North', areaHectares: 2.4, status: 'acquired', stage: 'Section 23 Award Declared', marketValueCr: 1.45, solatiumCr: 1.45, totalCompensationCr: 2.90, delayRisk: 8, predictedSlippageMonths: 0.0, anomaly: 'None - Direct Consent Agreement', dbtStatus: 'PFMS Disbursed', lat: 19.5700, lng: 72.8200 },
-  { id: 'P-612', ulpin: 'MH-27-P612-9910', surveyNo: '54/C', owner: 'Anand Shinde', village: 'Virar Sector 9', areaHectares: 1.8, status: 'discovery', stage: 'Joint Measurement Survey (JMS)', marketValueCr: 1.90, solatiumCr: 1.90, totalCompensationCr: 3.80, delayRisk: 48, predictedSlippageMonths: 1.8, anomaly: 'Boundary Discrepancy with Cadastral Map', dbtStatus: 'Pending Verification', lat: 19.4600, lng: 72.8100 }
+  // Maharashtra / Palghar Node
+  { id: 'P-784', corridorId: 'mahsr', ulpin: 'MH-27-P784-9021', surveyNo: '142/3A', owner: 'Rameshwar Patil & Co-sharers', village: 'Palghar West', state: 'Maharashtra', areaHectares: 4.8, status: 'dispute', stage: 'Section 19 Declaration', marketValueCr: 2.14, solatiumCr: 2.14, totalCompensationCr: 4.28, delayRisk: 89, predictedSlippageMonths: 4.5, anomaly: 'Title Litigation & Valuation Dispute', dbtStatus: 'Escrow Frozen', lat: 19.6967, lng: 72.7699 },
+  { id: 'P-235', corridorId: 'mahsr', ulpin: 'MH-27-P235-4102', surveyNo: '88/1', owner: 'Gram Panchayat Common Land', village: 'Kelwe Node', state: 'Maharashtra', areaHectares: 12.2, status: 'negotiation', stage: 'Section 11 Preliminary', marketValueCr: 3.50, solatiumCr: 3.50, totalCompensationCr: 7.00, delayRisk: 42, predictedSlippageMonths: 1.5, anomaly: '18% Valuation Anomaly below Circle Rate', dbtStatus: 'Under Review', lat: 19.6200, lng: 72.7300 },
+  { id: 'P-912', corridorId: 'mahsr', ulpin: 'MH-27-P912-8834', surveyNo: '204/B', owner: 'Sunita Devi & Heirs', village: 'Manor Rural', state: 'Maharashtra', areaHectares: 3.1, status: 'discovery', stage: 'Social Impact Assessment', marketValueCr: 1.10, solatiumCr: 1.10, totalCompensationCr: 2.20, delayRisk: 61, predictedSlippageMonths: 2.8, anomaly: 'Missing 7/12 Land Extracts', dbtStatus: 'Pending Verification', lat: 19.7400, lng: 72.9100 },
+  { id: 'P-104', corridorId: 'dmic', ulpin: 'MH-27-P104-1290', surveyNo: '12/4', owner: 'Maharashtra Agro Industries Corp', village: 'Boisar Industrial Zone', state: 'Maharashtra', areaHectares: 18.5, status: 'acquired', stage: 'Section 38 Possession Handover', marketValueCr: 9.80, solatiumCr: 9.80, totalCompensationCr: 19.60, delayRisk: 4, predictedSlippageMonths: 0.0, anomaly: 'None - Clean Title', dbtStatus: 'PFMS Disbursed', lat: 19.8000, lng: 72.7550 },
+  
+  // Gujarat / Surat & Ahmedabad Nodes
+  { id: 'P-502', corridorId: 'mahsr', ulpin: 'GJ-24-P502-3310', surveyNo: '411/2', owner: 'Bhupendra Patel & Sons', village: 'Surat Bullet Terminal Node', state: 'Gujarat', areaHectares: 8.4, status: 'acquired', stage: 'Section 38 Possession Handover', marketValueCr: 6.20, solatiumCr: 6.20, totalCompensationCr: 12.40, delayRisk: 6, predictedSlippageMonths: 0.0, anomaly: 'None - Fast-track Award Consent', dbtStatus: 'PFMS Disbursed', lat: 21.1702, lng: 72.8311 },
+  { id: 'P-519', corridorId: 'mahsr', ulpin: 'GJ-24-P519-7814', surveyNo: '19/A', owner: 'Navsari Horticultural Trust', village: 'Navsari Bypass', state: 'Gujarat', areaHectares: 5.2, status: 'negotiation', stage: 'Section 19 Declaration', marketValueCr: 3.10, solatiumCr: 3.10, totalCompensationCr: 6.20, delayRisk: 48, predictedSlippageMonths: 1.8, anomaly: 'Tree Crop Valuation Compensation Appeal', dbtStatus: 'Under Review', lat: 20.9467, lng: 72.9520 },
+  { id: 'P-580', corridorId: 'mahsr', ulpin: 'GJ-24-P580-9941', surveyNo: '62/3', owner: 'Sabarmati Railway Yard Authority', village: 'Sabarmati Hub', state: 'Gujarat', areaHectares: 14.0, status: 'acquired', stage: 'Section 38 Possession Handover', marketValueCr: 15.00, solatiumCr: 15.00, totalCompensationCr: 30.00, delayRisk: 2, predictedSlippageMonths: 0.0, anomaly: 'Inter-Departmental Transfer Complete', dbtStatus: 'PFMS Disbursed', lat: 23.0805, lng: 72.5850 },
+  
+  // Gujarat Dholera Node (DMIC)
+  { id: 'P-610', corridorId: 'dmic', ulpin: 'GJ-07-P610-1123', surveyNo: '89/1B', owner: 'Dholera Smart City Land Pool', village: 'Dholera Special Investment Region', state: 'Gujarat', areaHectares: 45.0, status: 'negotiation', stage: 'Section 19 Declaration', marketValueCr: 18.50, solatiumCr: 18.50, totalCompensationCr: 37.00, delayRisk: 35, predictedSlippageMonths: 1.2, anomaly: 'Town Planning Scheme (TP-1) Boundary Readjustment', dbtStatus: 'Under Review', lat: 22.2471, lng: 72.1932 },
+  
+  // Rajasthan / NCR Node (DMIC)
+  { id: 'P-720', corridorId: 'dmic', ulpin: 'RJ-02-P720-4491', surveyNo: '302/A', owner: 'Kisan Cooperative Society Neemrana', village: 'Neemrana Japanese Zone', state: 'Rajasthan', areaHectares: 16.5, status: 'dispute', stage: 'Section 11 Preliminary', marketValueCr: 7.80, solatiumCr: 7.80, totalCompensationCr: 15.60, delayRisk: 84, predictedSlippageMonths: 4.1, anomaly: 'Gram Sabha Resolution Dispute on Land Use', dbtStatus: 'Escrow Frozen', lat: 27.9868, lng: 76.3828 },
+  { id: 'P-745', corridorId: 'dmic', ulpin: 'UP-16-P745-0012', surveyNo: '54/1', owner: 'Greater Noida Multi-Modal Hub', village: 'Dadri Multimodal Terminal', state: 'Uttar Pradesh', areaHectares: 28.0, status: 'acquired', stage: 'Section 38 Possession Handover', marketValueCr: 24.00, solatiumCr: 24.00, totalCompensationCr: 48.00, delayRisk: 5, predictedSlippageMonths: 0.0, anomaly: 'None - National Asset Land Bank', dbtStatus: 'PFMS Disbursed', lat: 28.5355, lng: 77.5458 },
+
+  // Karnataka / Tamil Nadu (CBIC Corridor)
+  { id: 'P-810', corridorId: 'cbic', ulpin: 'KA-05-P810-6623', surveyNo: '112/5', owner: 'Hosur Border Agro Exports', village: 'Hosur SIPCOT Sector 2', state: 'Tamil Nadu', areaHectares: 9.8, status: 'negotiation', stage: 'Section 19 Declaration', marketValueCr: 6.40, solatiumCr: 6.40, totalCompensationCr: 12.80, delayRisk: 52, predictedSlippageMonths: 2.2, anomaly: 'Interstate Tax Jurisdiction Objections', dbtStatus: 'Under Review', lat: 12.7409, lng: 77.8253 },
+  { id: 'P-835', corridorId: 'cbic', ulpin: 'TN-01-P835-9014', surveyNo: '78/2A', owner: 'Sriperumbudur Auto Cluster Trust', village: 'Sriperumbudur Hub', state: 'Tamil Nadu', areaHectares: 21.0, status: 'acquired', stage: 'Section 38 Possession Handover', marketValueCr: 14.50, solatiumCr: 14.50, totalCompensationCr: 29.00, delayRisk: 3, predictedSlippageMonths: 0.0, anomaly: 'None - Direct Industrial Acquisition', dbtStatus: 'PFMS Disbursed', lat: 12.9710, lng: 79.9480 }
 ];
 
 // Initial Grievance Queue
@@ -66,22 +207,34 @@ const INITIAL_GRIEVANCES = [
   { id: 'GRV-401', parcelId: 'P-784', landowner: 'Rameshwar Patil', title: 'Disputed Heirship & Title Partition', severity: 'critical', sentimentScore: -0.85, filingDate: '2026-10-02', legalSection: 'RFCTLARR Sec 15 Objection', status: 'Pending Collector Hearing', summary: 'Co-sharer filed caveat claiming unauthorized power-of-attorney execution without succession certificate.' },
   { id: 'GRV-388', parcelId: 'P-235', landowner: 'Gram Sabha Kelwe', title: '18% Compensation Valuation Mismatch', severity: 'warning', sentimentScore: -0.52, filingDate: '2026-09-28', legalSection: 'RFCTLARR Sec 26 Market Rate Determination', status: 'In Revenue Review', summary: 'Current award calculated on 2021 Ready Reckoner instead of mandated average registered sale deeds for past 3 years.' },
   { id: 'GRV-374', parcelId: 'P-912', landowner: 'Sunita Devi', title: 'Unlinked 7/12 Land Extracts & Mutation Delay', severity: 'review', sentimentScore: -0.25, filingDate: '2026-10-04', legalSection: 'Sec 11 Preliminary Survey', status: 'Notice Dispatched', summary: 'Talathi portal mutation entry pending verification under Digital India Land Records Modernization Programme (DILRMP).' },
-  { id: 'GRV-360', parcelId: 'P-320', landowner: 'Kisan Tribal Welfare Trust', title: 'Forest Rights Act (FRA) Gram Sabha Consent Contest', severity: 'critical', sentimentScore: -0.91, filingDate: '2026-09-25', legalSection: 'Scheduled Tribes & Forest Dwellers Act 2006', status: 'Collector Action Ordered', summary: 'Resolution submitted questioning adequacy of Rehabilitation and Resettlement (R&R) compensatory forestry allotment.' }
+  { id: 'GRV-355', parcelId: 'P-720', landowner: 'Kisan Society Neemrana', title: 'Gram Sabha FRA Forest Rights Non-Compliance', severity: 'critical', sentimentScore: -0.89, filingDate: '2026-09-29', legalSection: 'Sec 41 Special Provisions for SC/ST', status: 'Collector Action Ordered', summary: 'Objection raised on compensation multiplier applied for scheduled tribal settlement lands in corridor alignment.' }
 ];
 
-// Block Ledger Mock for Tab 6
+// Cryptographic Ledger for Tab 6
 const AUDIT_CHAIN = [
-  { blockNo: 48204, timestamp: '2026-10-05 23:45:12 IST', parcelId: 'P-104', action: 'PFMS DBT Direct Disbursement Approved', actor: 'District Collector (DM-MH-204)', amountCr: 19.60, hash: '0x7f8a3c9b21a8f94e63b01c72ea8910d5', verified: true },
-  { blockNo: 48203, timestamp: '2026-10-05 18:22:04 IST', parcelId: 'P-441', action: 'Section 23 Award Finalized & Cryptographically Signed', actor: 'Special Land Acquisition Officer (SLAO-03)', amountCr: 2.90, hash: '0x4e29ba1c902d44f1883c79a1f25cb804', verified: true },
-  { blockNo: 48202, timestamp: '2026-10-05 14:10:55 IST', parcelId: 'P-784', action: 'Grievance GRV-401 Auto-Classified by NLP & Frozen in Escrow', actor: 'Bhoomi Sethu AI Kernel (Rule Sec 64)', amountCr: 4.28, hash: '0x99a147d3e0b2110c7349581ae77c4491', verified: true },
-  { blockNo: 48201, timestamp: '2026-10-04 11:30:19 IST', parcelId: 'P-235', action: 'Valuation Anomaly Flagged (18% Sub-Circle Variance)', actor: 'AI Anomaly Model v4.2', amountCr: 7.00, hash: '0x12d8ec4008b6294711fa7a8109d43ef1', verified: true },
-  { blockNo: 48200, timestamp: '2026-10-03 09:15:40 IST', parcelId: 'P-556', action: 'Joint Measurement Survey (JMS) GIS Vector Layer Synchronized', actor: 'Field Surveyor (Talathi-MH-44)', amountCr: 4.80, hash: '0x88f237190d402ca8b182740924ecda18', verified: true }
+  { blockNo: 48206, timestamp: '2026-10-05 23:45:12 IST', parcelId: 'P-502', action: 'PFMS DBT Direct Disbursement Approved (Surat)', actor: 'District Collector (DM-GJ-102)', amountCr: 12.40, hash: '0x8f2a1b9c44d7e8201fa877c449190d5', verified: true },
+  { blockNo: 48205, timestamp: '2026-10-05 21:10:30 IST', parcelId: 'P-745', action: 'Section 38 Possession Handover Recorded (Dadri)', actor: 'SLAO Gautam Buddha Nagar', amountCr: 48.00, hash: '0x6e41b9d033a887f19920ac4109d43ef1', verified: true },
+  { blockNo: 48204, timestamp: '2026-10-05 18:22:04 IST', parcelId: 'P-104', action: 'PFMS Direct Disbursement Credited (Boisar)', actor: 'District Collector (DM-MH-204)', amountCr: 19.60, hash: '0x7f8a3c9b21a8f94e63b01c72ea8910d5', verified: true },
+  { blockNo: 48203, timestamp: '2026-10-05 14:10:55 IST', parcelId: 'P-784', action: 'Grievance GRV-401 Auto-Classified by NLP & Frozen in Escrow', actor: 'Bhoomi Sethu AI Kernel (Rule Sec 64)', amountCr: 4.28, hash: '0x99a147d3e0b2110c7349581ae77c4491', verified: true },
+  { blockNo: 48202, timestamp: '2026-10-04 11:30:19 IST', parcelId: 'P-235', action: 'Valuation Anomaly Flagged (18% Sub-Circle Variance)', actor: 'AI Anomaly Model v4.2', amountCr: 7.00, hash: '0x12d8ec4008b6294711fa7a8109d43ef1', verified: true }
 ];
+
+// Map View Controller Helper to smoothly fly anywhere
+function MapFlyController({ center, zoom }) {
+  const map = useMap();
+  useEffect(() => {
+    if (center && zoom) {
+      map.flyTo(center, zoom, { duration: 1.8, easeLinearity: 0.25 });
+    }
+  }, [center, zoom, map]);
+  return null;
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('gis'); // 'gis', 'ml', 'grievances', 'lifecycle', 'interop', 'audit'
-  const [selectedProject, setSelectedProject] = useState(PROJECTS[0].id);
-  const [userRole, setUserRole] = useState('collector'); // 'ministry', 'state', 'collector', 'field'
+  const [selectedProjectId, setSelectedProjectId] = useState('all_india');
+  const [currentBasemap, setCurrentBasemap] = useState('googleHybrid'); // Default to Google Satellite Hybrid!
+  const [userRole, setUserRole] = useState('collector');
   const [parcels, setParcels] = useState(INITIAL_PARCELS);
   const [grievances, setGrievances] = useState(INITIAL_GRIEVANCES);
   const [selectedParcel, setSelectedParcel] = useState(null);
@@ -89,6 +242,14 @@ export default function App() {
   const [filterStage, setFilterStage] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [toastMessage, setToastMessage] = useState(null);
+
+  // Map viewport control
+  const currentProject = useMemo(() => {
+    return PROJECTS.find(p => p.id === selectedProjectId) || PROJECTS[0];
+  }, [selectedProjectId]);
+
+  const [mapCenter, setMapCenter] = useState(currentProject.center);
+  const [mapZoom, setMapZoom] = useState(currentProject.zoom);
 
   // ML Simulation Inputs
   const [simStage, setSimStage] = useState('Section 19');
@@ -107,18 +268,31 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Filtered parcels
+  // Change project handler
+  const handleProjectChange = (projId) => {
+    setSelectedProjectId(projId);
+    const p = PROJECTS.find(item => item.id === projId);
+    if (p) {
+      setMapCenter(p.center);
+      setMapZoom(p.zoom);
+      showToast(`🗺️ Flew Map View to: ${p.name}`);
+    }
+  };
+
+  // Filtered parcels based on corridor selection, stage, and search query
   const filteredParcels = useMemo(() => {
     return parcels.filter(p => {
+      const matchCorridor = selectedProjectId === 'all_india' || p.corridorId === selectedProjectId;
       const matchStage = filterStage === 'all' || p.status === filterStage;
       const matchQuery = !searchQuery || 
         p.id.toLowerCase().includes(searchQuery.toLowerCase()) || 
         p.owner.toLowerCase().includes(searchQuery.toLowerCase()) || 
         p.ulpin.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.village.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchStage && matchQuery;
+        p.village.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.state.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchCorridor && matchStage && matchQuery;
     });
-  }, [parcels, filterStage, searchQuery]);
+  }, [parcels, selectedProjectId, filterStage, searchQuery]);
 
   // Dynamic ML Inference calculation based on inputs
   const calculatedRisk = useMemo(() => {
@@ -149,10 +323,10 @@ export default function App() {
     }
   };
 
-  // GeoJSON features for Leaflet
+  // Generate GeoJSON polygons for parcels with realistic sizes
   const geoJsonData = useMemo(() => {
-    const features = parcels.map(p => {
-      const size = 0.015;
+    const features = filteredParcels.map(p => {
+      const size = 0.025;
       return {
         type: "Feature",
         properties: { ...p },
@@ -161,15 +335,15 @@ export default function App() {
           coordinates: [[
             [p.lng - size, p.lat - size],
             [p.lng + size, p.lat - size],
-            [p.lng + size, p.lat + size],
-            [p.lng - size, p.lat + size],
+            [p.lng + size * 1.2, p.lat + size],
+            [p.lng - size * 0.8, p.lat + size * 1.1],
             [p.lng - size, p.lat - size]
           ]]
         }
       };
     });
     return { type: "FeatureCollection", features };
-  }, [parcels]);
+  }, [filteredParcels]);
 
   // Handle ULPIN Search
   const handleUlpinQuery = () => {
@@ -177,7 +351,7 @@ export default function App() {
     if (found) {
       setUlpinResult({
         ulpin: found.ulpin,
-        statePortal: 'MahaBhulekh (Govt of Maharashtra)',
+        statePortal: `${found.state} Land Records Portal`,
         khasra: found.surveyNo,
         owner: found.owner,
         village: found.village,
@@ -186,14 +360,18 @@ export default function App() {
         apiLatency: '14ms',
         securityCheck: 'AES-256 Validated (SHA-256 Match)'
       });
-      showToast(`✅ ULPIN ${found.ulpin} Verified with State Land Registry!`);
+      // Fly map to that parcel!
+      setMapCenter([found.lat, found.lng]);
+      setMapZoom(13);
+      setSelectedParcel(found);
+      showToast(`✅ ULPIN ${found.ulpin} Verified & Located on Global Map!`);
     } else {
       setUlpinResult({
         ulpin: ulpinInput,
         statePortal: 'National Bhu-Aadhaar Gateway',
         khasra: '190/A (Provisional)',
         owner: 'Simulated Verified Landholder',
-        village: 'Palghar Central',
+        village: 'National Corridor Land Bank',
         area: '5.20 Ha',
         dbtStatus: 'Aadhaar Seeded',
         apiLatency: '19ms',
@@ -211,7 +389,7 @@ export default function App() {
           ...p,
           status: 'acquired',
           stage: 'Section 38 Possession Handover',
-          delayRisk: 5,
+          delayRisk: 4,
           dbtStatus: 'PFMS Disbursed'
         };
       }
@@ -255,14 +433,11 @@ export default function App() {
           {/* Project Corridor Dropdown */}
           <select 
             className="select-pill"
-            value={selectedProject}
-            onChange={(e) => {
-              setSelectedProject(e.target.value);
-              showToast(`Switched Corridor: ${PROJECTS.find(p => p.id === e.target.value)?.name}`);
-            }}
+            value={selectedProjectId}
+            onChange={(e) => handleProjectChange(e.target.value)}
           >
             {PROJECTS.map(p => (
-              <option key={p.id} value={p.id}>🚆 {p.name}</option>
+              <option key={p.id} value={p.id}>{p.id === 'all_india' ? '🇮🇳' : '🚆'} {p.name}</option>
             ))}
           </select>
 
@@ -303,8 +478,8 @@ export default function App() {
           className={`nav-tab-btn ${activeTab === 'gis' ? 'active' : ''}`}
           onClick={() => setActiveTab('gis')}
         >
-          <Layers size={16} /> 1. GIS Spatial Tracking
-          <span className="nav-tab-badge">Live Map</span>
+          <Layers size={16} /> 1. GIS Spatial Tracking & Google Map
+          <span className="nav-tab-badge">Global Active</span>
         </button>
 
         <button 
@@ -352,7 +527,7 @@ export default function App() {
       <main className="tab-viewport">
 
         {/* ========================================================================= */}
-        {/* TAB 1: GIS SPATIAL TRACKING & MAP CADASTRE */}
+        {/* TAB 1: GIS SPATIAL TRACKING & GOOGLE MAP CADASTRE */}
         {/* ========================================================================= */}
         {activeTab === 'gis' && (
           <div className="gis-layout">
@@ -360,26 +535,62 @@ export default function App() {
             <div className="gis-sidebar">
               <div className="glass-panel glow-subtle">
                 <div className="section-heading">
-                  <span>Acquisition Progress</span>
+                  <span>National Acquisition Telemetry</span>
                   <Activity size={16} color="#0ea5e9" />
                 </div>
                 <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem'}}>
                   <div style={{background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '10px'}}>
-                    <div style={{fontSize: '0.7rem', color: 'var(--text-muted)'}}>Total Parcels</div>
-                    <div style={{fontSize: '1.5rem', fontWeight: '800', color: 'white'}}>1,482</div>
+                    <div style={{fontSize: '0.7rem', color: 'var(--text-muted)'}}>Active Parcels</div>
+                    <div style={{fontSize: '1.4rem', fontWeight: '800', color: 'white'}}>
+                      {filteredParcels.length} <span style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>/ 8,450</span>
+                    </div>
                   </div>
                   <div style={{background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '10px'}}>
                     <div style={{fontSize: '0.7rem', color: 'var(--text-muted)'}}>Acquired (Ha)</div>
-                    <div style={{fontSize: '1.5rem', fontWeight: '800', color: '#10b981'}}>10,210</div>
+                    <div style={{fontSize: '1.4rem', fontWeight: '800', color: '#10b981'}}>10,210</div>
                   </div>
                   <div style={{background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '10px'}}>
                     <div style={{fontSize: '0.7rem', color: 'var(--text-muted)'}}>In Negotiation</div>
-                    <div style={{fontSize: '1.5rem', fontWeight: '800', color: '#f59e0b'}}>231</div>
+                    <div style={{fontSize: '1.4rem', fontWeight: '800', color: '#f59e0b'}}>231</div>
                   </div>
                   <div style={{background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '10px'}}>
                     <div style={{fontSize: '0.7rem', color: 'var(--text-muted)'}}>Litigated / Court</div>
-                    <div style={{fontSize: '1.5rem', fontWeight: '800', color: '#f43f5e'}}>41</div>
+                    <div style={{fontSize: '1.4rem', fontWeight: '800', color: '#f43f5e'}}>41</div>
                   </div>
+                </div>
+              </div>
+
+              {/* Quick National Corridor Jump Buttons */}
+              <div className="glass-panel">
+                <div className="section-heading">
+                  <span>Quick Corridor Jump</span>
+                  <Compass size={15} color="#38bdf8" />
+                </div>
+                <div style={{display: 'flex', flexDirection: 'column', gap: '0.45rem'}}>
+                  {PROJECTS.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => handleProjectChange(p.id)}
+                      style={{
+                        padding: '0.55rem 0.8rem',
+                        borderRadius: '8px',
+                        background: selectedProjectId === p.id ? 'rgba(14, 165, 233, 0.2)' : 'rgba(255,255,255,0.03)',
+                        border: selectedProjectId === p.id ? '1px solid #0ea5e9' : '1px solid transparent',
+                        color: 'white',
+                        fontSize: '0.78rem',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <span style={{fontWeight: selectedProjectId === p.id ? '700' : '500'}}>
+                        {p.id === 'all_india' ? '🇮🇳 All India Grid' : p.name.split('(')[0]}
+                      </span>
+                      <span style={{fontSize: '0.7rem', color: '#38bdf8'}}>{p.state.split('/')[0]}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -389,7 +600,7 @@ export default function App() {
                   <span>Filter by Parcel Stage</span>
                   <Sliders size={15} color="#94a3b8" />
                 </div>
-                <div style={{display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
+                <div style={{display: 'flex', flexDirection: 'column', gap: '0.45rem'}}>
                   {[
                     { id: 'all', label: 'All Land Parcels', count: parcels.length, color: '#e2e8f0' },
                     { id: 'discovery', label: 'Discovery / JMS Survey', count: parcels.filter(p => p.status === 'discovery').length, color: '#0ea5e9' },
@@ -404,12 +615,12 @@ export default function App() {
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center',
-                        padding: '0.55rem 0.8rem',
+                        padding: '0.45rem 0.8rem',
                         borderRadius: '8px',
                         background: filterStage === tab.id ? 'rgba(14, 165, 233, 0.15)' : 'rgba(255, 255, 255, 0.03)',
                         border: filterStage === tab.id ? '1px solid #0ea5e9' : '1px solid transparent',
                         color: 'white',
-                        fontSize: '0.8rem',
+                        fontSize: '0.78rem',
                         cursor: 'pointer',
                         textAlign: 'left'
                       }}
@@ -418,7 +629,7 @@ export default function App() {
                         <span style={{width: '8px', height: '8px', borderRadius: '50%', background: tab.color}}></span>
                         <span>{tab.label}</span>
                       </div>
-                      <span style={{color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem'}}>{tab.count}</span>
+                      <span style={{color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.72rem'}}>{tab.count}</span>
                     </button>
                   ))}
                 </div>
@@ -446,35 +657,66 @@ export default function App() {
                   </button>
                 </div>
               ) : (
-                <div className="glass-panel" style={{textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)'}}>
-                  <MapPin size={24} style={{margin: '0 auto 0.5rem auto', display: 'block', opacity: 0.5}} />
-                  <div style={{fontSize: '0.8rem'}}>Click any parcel polygon on the map or row in the table to inspect details.</div>
+                <div className="glass-panel" style={{textAlign: 'center', padding: '1rem', color: 'var(--text-muted)'}}>
+                  <MapPin size={22} style={{margin: '0 auto 0.4rem auto', display: 'block', opacity: 0.5}} />
+                  <div style={{fontSize: '0.75rem'}}>Click any parcel polygon on the map or row in the table to inspect details.</div>
                 </div>
               )}
             </div>
 
             {/* Main Interactive Map Viewport */}
             <div className="gis-map-viewport">
-              {/* Map Floating Header */}
+              {/* Map Floating Header Controls: Search & BaseMap Switcher */}
               <div className="map-controls-floating">
-                <div style={{display: 'flex', gap: '0.5rem', background: 'rgba(10, 16, 31, 0.85)', padding: '0.4rem 0.6rem', borderRadius: '10px', backdropFilter: 'blur(10px)', border: '1px solid var(--border-subtle)'}}>
+                {/* Search Bar */}
+                <div style={{display: 'flex', gap: '0.5rem', background: 'rgba(10, 16, 31, 0.9)', padding: '0.4rem 0.75rem', borderRadius: '10px', backdropFilter: 'blur(16px)', border: '1px solid var(--border-subtle)', boxShadow: '0 4px 20px rgba(0,0,0,0.5)'}}>
+                  <Search size={15} color="#38bdf8" style={{alignSelf: 'center'}} />
                   <input 
                     type="text" 
-                    placeholder="Search by Parcel ID, ULPIN, Owner..."
+                    placeholder="Search any Parcel ID, ULPIN, State, City, or Owner..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    style={{background: 'transparent', border: 'none', color: 'white', outline: 'none', fontSize: '0.8rem', width: '220px'}}
+                    style={{background: 'transparent', border: 'none', color: 'white', outline: 'none', fontSize: '0.8rem', width: '280px'}}
                   />
                   {searchQuery && <button onClick={() => setSearchQuery('')} style={{background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer'}}><X size={14} /></button>}
+                </div>
+
+                {/* Basemap Switcher Buttons (Google Satellite, Google Streets, Terrain, Dark) */}
+                <div style={{display: 'flex', gap: '0.35rem', background: 'rgba(10, 16, 31, 0.9)', padding: '0.35rem 0.5rem', borderRadius: '10px', backdropFilter: 'blur(16px)', border: '1px solid var(--border-subtle)', boxShadow: '0 4px 20px rgba(0,0,0,0.5)'}}>
+                  {Object.values(BASEMAPS).map(bm => (
+                    <button
+                      key={bm.id}
+                      onClick={() => {
+                        setCurrentBasemap(bm.id);
+                        showToast(`Switched Basemap to: ${bm.name}`);
+                      }}
+                      style={{
+                        padding: '0.35rem 0.65rem',
+                        borderRadius: '6px',
+                        border: currentBasemap === bm.id ? '1px solid #0ea5e9' : '1px solid transparent',
+                        background: currentBasemap === bm.id ? 'rgba(14, 165, 233, 0.25)' : 'transparent',
+                        color: currentBasemap === bm.id ? '#38bdf8' : '#94a3b8',
+                        fontSize: '0.74rem',
+                        fontWeight: currentBasemap === bm.id ? '700' : '500',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem'
+                      }}
+                    >
+                      <span>{bm.icon}</span>
+                      <span>{bm.name.split('(')[0]}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
               {/* Map Floating Legend */}
               <div className="map-legend-floating">
-                <div style={{fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.5rem'}}>
+                <div style={{fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.4rem'}}>
                   Spatial Stage Legend
                 </div>
-                <div style={{display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.75rem'}}>
+                <div style={{display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.72rem'}}>
                   <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
                     <span style={{width: '10px', height: '10px', borderRadius: '50%', background: '#0ea5e9'}}></span> Discovery / JMS (Sec 4)
                   </div>
@@ -487,35 +729,65 @@ export default function App() {
                   <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
                     <span style={{width: '10px', height: '10px', borderRadius: '50%', background: '#10b981'}}></span> Acquired & Disbursed (Sec 38)
                   </div>
+                  <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.2rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '0.2rem'}}>
+                    <span style={{width: '18px', height: '3px', background: '#38bdf8'}}></span> Infrastructure Alignment
+                  </div>
                 </div>
               </div>
 
-              {/* Interactive Leaflet Map */}
+              {/* Interactive Leaflet Map with World Coverage & Google Map Tiles */}
               <MapContainer 
-                center={[19.6967, 72.7699]} 
-                zoom={11} 
+                center={mapCenter} 
+                zoom={mapZoom} 
+                minZoom={3}
+                maxZoom={19}
                 style={{ height: '100%', width: '100%', background: '#050b14' }} 
                 zoomControl={false}
               >
+                <MapFlyController center={mapCenter} zoom={mapZoom} />
+
+                {/* Selected Basemap Layer (Google Satellite Hybrid / Google Streets / Terrain / Esri) */}
                 <TileLayer
-                  url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
-                  attribution="Tiles &copy; Esri &mdash; Bhoomi Sethu Spatial Cadastre"
+                  key={currentBasemap}
+                  url={BASEMAPS[currentBasemap].url}
+                  attribution={BASEMAPS[currentBasemap].attribution}
+                  maxZoom={19}
                 />
+
+                {/* Major Infrastructure Corridors Alignments */}
+                {Object.entries(CORRIDOR_ALIGNMENTS).map(([cId, coords]) => (
+                  <Polyline
+                    key={cId}
+                    positions={coords}
+                    pathOptions={{
+                      color: selectedProjectId === cId || selectedProjectId === 'all_india' ? '#38bdf8' : 'rgba(255,255,255,0.2)',
+                      weight: selectedProjectId === cId ? 5 : 3,
+                      dashArray: selectedProjectId === cId ? null : '6, 6',
+                      opacity: 0.9
+                    }}
+                  />
+                ))}
+
+                {/* Land Parcel Polygons */}
                 <GeoJSON
-                  key={JSON.stringify(filteredParcels)}
+                  key={`${JSON.stringify(filteredParcels)}-${currentBasemap}`}
                   data={geoJsonData}
                   style={(feature) => ({
                     color: getStatusColor(feature.properties.status),
                     weight: selectedParcel?.id === feature.properties.id ? 4 : 2,
-                    fillOpacity: selectedParcel?.id === feature.properties.id ? 0.6 : 0.35,
-                    dashArray: feature.properties.status === 'dispute' ? '4, 4' : null
+                    fillOpacity: selectedParcel?.id === feature.properties.id ? 0.65 : 0.4,
+                    dashArray: feature.properties.status === 'dispute' ? '5, 5' : null
                   })}
                   onEachFeature={(feature, layer) => {
                     layer.on({
-                      click: () => setSelectedParcel(feature.properties)
+                      click: () => {
+                        setSelectedParcel(feature.properties);
+                        setMapCenter([feature.properties.lat, feature.properties.lng]);
+                        setMapZoom(13);
+                      }
                     });
                     layer.bindTooltip(
-                      `<b>Parcel #${feature.properties.id}</b><br/>${feature.properties.owner}<br/>Status: ${feature.properties.status.toUpperCase()}`,
+                      `<b>Parcel #${feature.properties.id}</b><br/>${feature.properties.owner}<br/>${feature.properties.village}, ${feature.properties.state}<br/>Status: <b>${feature.properties.status.toUpperCase()}</b>`,
                       { sticky: true }
                     );
                   }}
@@ -527,7 +799,7 @@ export default function App() {
                 <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem'}}>
                   <div style={{fontSize: '0.8rem', fontWeight: '700', color: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
                     <Activity size={14} color="#0ea5e9" />
-                    <span>Real-Time Cadastral Intelligence Feed ({filteredParcels.length} Parcels Displayed)</span>
+                    <span>Real-Time Cadastral Intelligence Feed ({filteredParcels.length} Parcels Mapped Across Corridors)</span>
                   </div>
                   <span className="badge-tag info">Live ML Sync</span>
                 </div>
@@ -537,7 +809,7 @@ export default function App() {
                       <th>Parcel ID</th>
                       <th>ULPIN</th>
                       <th>Landowner</th>
-                      <th>Village</th>
+                      <th>State / Village</th>
                       <th>Statutory Stage</th>
                       <th>Total Award</th>
                       <th>AI Risk</th>
@@ -553,12 +825,16 @@ export default function App() {
                           cursor: 'pointer',
                           background: selectedParcel?.id === p.id ? 'rgba(14, 165, 233, 0.12)' : 'transparent'
                         }}
-                        onClick={() => setSelectedParcel(p)}
+                        onClick={() => {
+                          setSelectedParcel(p);
+                          setMapCenter([p.lat, p.lng]);
+                          setMapZoom(13);
+                        }}
                       >
                         <td style={{fontFamily: 'var(--font-mono)', fontWeight: '700', color: '#38bdf8'}}>#{p.id}</td>
-                        <td style={{fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-muted)'}}>{p.ulpin}</td>
+                        <td style={{fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--text-muted)'}}>{p.ulpin}</td>
                         <td style={{fontWeight: '500'}}>{p.owner}</td>
-                        <td>{p.village}</td>
+                        <td>{p.village}, {p.state}</td>
                         <td>
                           <span className={`badge-tag ${
                             p.status === 'acquired' ? 'success' :
@@ -582,6 +858,8 @@ export default function App() {
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedParcel(p);
+                              setMapCenter([p.lat, p.lng]);
+                              setMapZoom(13);
                             }}
                           >
                             Inspect
@@ -923,12 +1201,12 @@ export default function App() {
                       <span className="badge-tag info">Ready to Serve</span>
                     </div>
                     <div style={{fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: '#cbd5e1', lineHeight: 1.6, background: 'rgba(0,0,0,0.3)', padding: '0.75rem', borderRadius: '8px'}}>
-                      BEFORE THE COURT OF THE DISTRICT MAGISTRATE & LAND ACQUISITION OFFICER, PALGHAR.<br/><br/>
+                      BEFORE THE COURT OF THE DISTRICT MAGISTRATE & LAND ACQUISITION OFFICER.<br/><br/>
                       <b>NOTICE UNDER SECTION 15(2) OF THE RFCTLARR ACT, 2013</b><br/>
-                      IN RE: PARCEL #{selectedGrievance.parcelId} (ULPIN: MH-27-P784-9021)<br/>
+                      IN RE: PARCEL #{selectedGrievance.parcelId}<br/>
                       TO: {selectedGrievance.landowner} & OBJECTING PARTIES<br/><br/>
                       WHEREAS an objection regarding "{selectedGrievance.title}" has been registered in the Bhoomi Sethu National Portal on {selectedGrievance.filingDate}.<br/>
-                      YOU ARE HEREBY SUMMONED to appear before the Collector's Tribunal on 12-OCT-2026 at 11:00 AM with original 7/12 extracts and title deeds.
+                      YOU ARE HEREBY SUMMONED to appear before the Collector's Tribunal on 12-OCT-2026 at 11:00 AM with original 7/12 extracts, title deeds, and succession certificates.
                     </div>
                   </div>
 
@@ -976,7 +1254,7 @@ export default function App() {
                   { stage: 'Stage 2: Preliminary Notification', section: 'Section 11(1)', desc: 'Gazette publication & objection window', count: '1,390 Parcels', pct: '94% Gazetted', color: '#38bdf8' },
                   { stage: 'Stage 3: Declaration of Acquisition', section: 'Section 19(1)', desc: 'Final declaration of public purpose', count: '1,200 Parcels', pct: '81% Approved', color: '#f59e0b' },
                   { stage: 'Stage 4: Award & Possession', section: 'Section 23 & 38', desc: 'Solatium determination & PFMS DBT', count: '1,023 Parcels', pct: '69% Disbursed', color: '#10b981' }
-                ].map((st, i) => (
+                ].map((st) => (
                   <div 
                     key={st.stage}
                     style={{
@@ -1038,18 +1316,18 @@ export default function App() {
                   <tbody>
                     <tr>
                       <td style={{fontFamily: 'var(--font-mono)', color: '#38bdf8'}}>PFMS-2026-9041</td>
-                      <td style={{fontFamily: 'var(--font-mono)'}}>#P-104</td>
-                      <td>Maha Agro Industries</td>
+                      <td style={{fontFamily: 'var(--font-mono)'}}>#P-502</td>
+                      <td>Bhupendra Patel</td>
                       <td>SBIN0001429</td>
-                      <td style={{fontWeight: '700'}}>₹19.60 Cr</td>
+                      <td style={{fontWeight: '700'}}>₹12.40 Cr</td>
                       <td><span className="badge-tag success">Credited via DBT</span></td>
                     </tr>
                     <tr>
                       <td style={{fontFamily: 'var(--font-mono)', color: '#38bdf8'}}>PFMS-2026-9039</td>
-                      <td style={{fontFamily: 'var(--font-mono)'}}>#P-441</td>
-                      <td>Deepak Mhatre</td>
+                      <td style={{fontFamily: 'var(--font-mono)'}}>#P-745</td>
+                      <td>Dadri Land Holding Corp</td>
                       <td>HDFC0000882</td>
-                      <td style={{fontWeight: '700'}}>₹2.90 Cr</td>
+                      <td style={{fontWeight: '700'}}>₹48.00 Cr</td>
                       <td><span className="badge-tag success">Credited via DBT</span></td>
                     </tr>
                     <tr>
@@ -1080,7 +1358,7 @@ export default function App() {
                   </div>
                   <div style={{display: 'flex', justifyContent: 'space-between', padding: '0.5rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px'}}>
                     <span style={{color: 'var(--text-muted)'}}>Rural Multiplier Factor:</span>
-                    <span style={{fontWeight: '700', color: '#38bdf8'}}>2.0x (Rural Palghar)</span>
+                    <span style={{fontWeight: '700', color: '#38bdf8'}}>2.0x (Rural Multiplier)</span>
                   </div>
                   <div style={{display: 'flex', justifyContent: 'space-between', padding: '0.5rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px'}}>
                     <span style={{color: 'var(--text-muted)'}}>Adjusted Market Value:</span>
@@ -1340,7 +1618,7 @@ export default function App() {
             <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem', fontSize: '0.8rem'}}>
               <div><span style={{color: 'var(--text-muted)'}}>Survey / Khasra No:</span><br/><b>{selectedParcel.surveyNo}</b></div>
               <div><span style={{color: 'var(--text-muted)'}}>Recorded Landowner:</span><br/><b>{selectedParcel.owner}</b></div>
-              <div><span style={{color: 'var(--text-muted)'}}>Village & Taluka:</span><br/><b>{selectedParcel.village}</b></div>
+              <div><span style={{color: 'var(--text-muted)'}}>Village & State:</span><br/><b>{selectedParcel.village}, {selectedParcel.state}</b></div>
               <div><span style={{color: 'var(--text-muted)'}}>Parcel Area:</span><br/><b>{selectedParcel.areaHectares} Hectares</b></div>
               <div><span style={{color: 'var(--text-muted)'}}>Statutory LARR Stage:</span><br/><b style={{color: '#38bdf8'}}>{selectedParcel.stage}</b></div>
               <div><span style={{color: 'var(--text-muted)'}}>PFMS Disbursement:</span><br/><b style={{color: selectedParcel.dbtStatus === 'PFMS Disbursed' ? '#10b981' : '#f59e0b'}}>{selectedParcel.dbtStatus}</b></div>
