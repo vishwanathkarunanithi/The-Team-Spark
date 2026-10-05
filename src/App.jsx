@@ -130,8 +130,8 @@ const App = () => {
           </div>
           <MapContainer center={[19.0760, 72.8777]} zoom={13} style={{ height: '100%', width: '100%', background: '#0d1117' }} zoomControl={false}>
             <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-              attribution="&copy; CARTO"
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+              attribution="Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ"
             />
             {geoData && (
               <GeoJSON 
